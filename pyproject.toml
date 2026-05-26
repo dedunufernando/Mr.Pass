@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pwgen-engine"
+version = "0.1.0"
+description = "Password candidate list generator for authorized security testing."
+requires-python = ">=3.11"
+dependencies = [
+    "pybloom-live>=3.0",
+    "tqdm>=4.66",
+    "rich>=13.0",
+    "pyyaml>=6.0",
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+viz  = ["matplotlib>=3.8", "seaborn>=0.13"]
+perf = ["numba>=0.59"]
+gpu  = ["cupy-cuda12x"]
+dev  = ["pytest>=7.0", "pytest-cov", "black", "ruff"]
+
+[project.scripts]
+pwgen = "pwgen.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pwgen*"]

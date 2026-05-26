@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+tests/
+scripts/
+*.txt.gz
+wordlist.txt
+out_*.txt
+bench_out.txt
+.git/

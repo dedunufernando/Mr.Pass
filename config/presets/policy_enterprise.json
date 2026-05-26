@@ -1,0 +1,17 @@
+{
+  "charset": "alnum",
+  "min_length": 8,
+  "max_length": 12,
+  "charset_options": {
+    "require_classes": ["upper", "lower", "digit"]
+  },
+  "entropy": {"min_bits": 30},
+  "no_consecutive": [{"char": "any", "count": 3}],
+  "keyboard_walk": {"reject_if_walk_ratio_above": 0.5},
+  "output": {
+    "format": "txt",
+    "path": "enterprise.txt",
+    "include_header": true,
+    "sort_by": "entropy"
+  }
+}

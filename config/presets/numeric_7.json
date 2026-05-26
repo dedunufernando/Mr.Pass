@@ -1,0 +1,14 @@
+{
+  "charset": "digits",
+  "length": 7,
+  "no_consecutive": [
+    {"char": "0", "count": 3}
+  ],
+  "max_repeats": {"digits": 2},
+  "output": {
+    "format": "txt",
+    "path": "numeric_7.txt",
+    "include_header": true,
+    "sort_by": "entropy"
+  }
+}

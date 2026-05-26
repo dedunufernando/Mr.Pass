@@ -1,0 +1,11 @@
+{
+  "charset": "binary",
+  "min_length": 6,
+  "max_length": 8,
+  "output": {
+    "format": "txt",
+    "path": "ctf_binary.txt",
+    "include_header": true,
+    "sort_by": "none"
+  }
+}
