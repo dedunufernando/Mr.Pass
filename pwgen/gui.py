@@ -494,7 +494,7 @@ class PwgenGUI:
 
         self._rl(tk.Label(of, text="Mutations", bg=t["bg"], fg=t["fg"], font=_FONT)
              ).grid(row=0, column=6, sticky="e", padx=(8, 2))
-        self.mutations_var = tk.StringVar(value="none")
+        self.mutations_var = tk.StringVar(value="standard")
         ttk.Combobox(of, textvariable=self.mutations_var, values=_MUTATIONS,
                      state="readonly", width=12, font=_FONT,
                     ).grid(row=0, column=7, padx=4, pady=4)
@@ -1000,15 +1000,18 @@ class PwgenGUI:
                 elif answer is None:
                     return False
 
-            # 2c. Mutations=none tip (non-blocking, informational)
+            # 2c. Mutations=none reminder (non-blocking)
             if self.mutations_var.get() == "none":
                 answer = messagebox.askokcancel(
-                    "Mr.Pass — Wordlist Tip",
+                    "Mr.Pass — Very few candidates expected",
                     "Mutations is set to 'none'.\n\n"
-                    "Your seed words will be output exactly as typed — no variations.\n\n"
-                    "For password testing, try:\n"
-                    "  Mutations → 'standard'   (capitalise, add numbers, leet-speak …)\n"
-                    "  Mutations → 'aggressive'  (many more combinations)\n\n"
+                    "Output will contain only your exact seed words — no variations.\n\n"
+                    "For practical password testing, change:\n"
+                    "  Mutations → 'standard'\n"
+                    "    Generates: dedunu0-9, dedunu!@#, Dedunu, d3dunu,\n"
+                    "               dedunu2004, Dedunu!, dedunu01-99 …\n\n"
+                    "  Mutations → 'aggressive'\n"
+                    "    Even more variants including cross-combinations.\n\n"
                     "Continue with exact seeds only?",
                 )
                 if not answer:
@@ -1083,7 +1086,7 @@ class PwgenGUI:
             cfg["keyboard_walk"] = {"reject_if_walk_ratio_above": 0.5}
 
         if self.mutations_var.get() != "none":
-            cfg["mutations"] = {"profile": self.mutations_var.get(), "max_expansion": 50}
+            cfg["mutations"] = {"profile": self.mutations_var.get(), "max_expansion": 2000}
 
         pos_rules: dict = {}
         if self.must_not_start_var.get().strip():
@@ -1259,12 +1262,38 @@ class PwgenGUI:
                 enabled = rules.mutations_enabled or PROFILES.get(rules.mutations_profile, [])
                 self._log(
                     f"Wordlist mode — {len(enabled)} mutation type(s): "
-                    f"{', '.join(enabled) if enabled else 'none (exact match only)'}"
+                    f"{', '.join(enabled) if enabled else 'none (exact seeds only)'}"
                 )
                 def source():
-                    for base in load_wordlist(rules):
+                    # Load all seeds upfront for cross-combination
+                    all_seeds = [w for w in load_wordlist(rules)]
+                    self._log(f"Loaded {len(all_seeds)} seed word(s).")
+
+                    # Per-seed mutations
+                    for base in all_seeds:
                         if self._stop_flag.is_set(): return
                         yield from apply_mutations(base, enabled, rules.max_expansion)
+
+                    # Cross-seed combinations (seed+seed, seed+seed+symbol, etc.)
+                    if len(all_seeds) > 1:
+                        self._log("Generating cross-seed combinations…")
+                        seen_cross: set[str] = set()
+                        for i, w1 in enumerate(all_seeds):
+                            for w2 in all_seeds:
+                                if self._stop_flag.is_set(): return
+                                if w1 == w2: continue
+                                for combo in (
+                                    w1 + w2,
+                                    w2 + w1,
+                                    w1 + w2 + "!",
+                                    w1 + w2 + "@",
+                                    w1.capitalize() + w2,
+                                    w1 + w2.capitalize(),
+                                    w1.capitalize() + w2.capitalize(),
+                                ):
+                                    if combo not in seen_cross:
+                                        seen_cross.add(combo)
+                                        yield combo
             else:
                 def source():
                     for pw in generate(rules):
