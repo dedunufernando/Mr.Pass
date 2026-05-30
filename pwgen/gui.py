@@ -61,21 +61,21 @@ DARK: dict[str, str] = {
     "hint_bg":  "#2a1e2e",   # subtle purple tint for hints
 }
 
-# ── Clean light (Tailwind slate / blue) ──────────────────────────────────────
+# ── Soft indigo light (attractive, not flat white) ───────────────────────────
 LIGHT: dict[str, str] = {
-    "bg":       "#f8fafc",   # slate-50  — near-white background
-    "fg":       "#1e293b",   # slate-800 — near-black text
-    "accent":   "#2563eb",   # blue-600
-    "btn_run":  "#16a34a",   # green-600
-    "btn_stop": "#dc2626",   # red-600
+    "bg":       "#eef1fb",   # periwinkle-white — warm tinted background
+    "fg":       "#1e2045",   # deep indigo text — high contrast
+    "accent":   "#3b5bdb",   # vivid indigo accent
+    "btn_run":  "#2f9e44",   # forest green
+    "btn_stop": "#e03131",   # deep red
     "btn_fg":   "#ffffff",
-    "entry_bg": "#ffffff",   # pure white entries
-    "log_bg":   "#f1f5f9",   # slate-100
-    "muted":    "#64748b",   # slate-500
-    "warn":     "#d97706",   # amber-600
-    "sel_bg":   "#dbeafe",   # blue-100
-    "seed_bg":  "#eff6ff",   # blue-50  — subtle blue tint
-    "hint_bg":  "#faf5ff",   # purple-50 — subtle purple tint
+    "entry_bg": "#ffffff",   # pure white inputs — pop against tinted bg
+    "log_bg":   "#dde3f7",   # muted indigo log panel
+    "muted":    "#6e79b5",   # softer indigo for hints/captions
+    "warn":     "#e67700",   # amber
+    "sel_bg":   "#bac8ff",   # indigo-200 selection highlight
+    "seed_bg":  "#e3f5ff",   # sky-blue tint for seed panel
+    "hint_bg":  "#f3e8ff",   # lavender tint for hints panel
 }
 
 
@@ -260,7 +260,7 @@ class PwgenGUI:
         mr_e.grid(row=2, column=3, padx=4, pady=3)
         _Tip(mr_e, "Max times any single digit may appear in the whole password.")
 
-        # Row 3 — Entropy / Walks / Require classes
+        # Row 3 — Entropy / Walks
         self._rl(tk.Label(cf, text="Min entropy (bits)", bg=t["bg"], fg=t["fg"], font=_FONT)
              ).grid(row=3, column=0, sticky="e", padx=(8, 2), pady=3)
         self.entropy_var = tk.StringVar()
@@ -276,22 +276,10 @@ class PwgenGUI:
             activebackground=t["bg"], font=_FONT,
         )).grid(row=3, column=2, columnspan=2, sticky="w", padx=12, pady=3)
 
-        self._rl(tk.Label(cf, text="Must contain", bg=t["bg"], fg=t["fg"], font=_FONT)
-             ).grid(row=3, column=4, sticky="e", padx=(12, 2))
-        self.req_upper_var  = tk.BooleanVar()
-        self.req_lower_var  = tk.BooleanVar()
-        self.req_digit_var  = tk.BooleanVar()
-        self.req_symbol_var = tk.BooleanVar()
-        for i, (lbl, var) in enumerate([
-            ("upper",  self.req_upper_var),
-            ("lower",  self.req_lower_var),
-            ("digit",  self.req_digit_var),
-            ("symbol", self.req_symbol_var),
-        ]):
-            self._rc(tk.Checkbutton(cf, text=lbl, variable=var,
-                bg=t["bg"], fg=t["fg"], selectcolor=t["entry_bg"],
-                activebackground=t["bg"], font=_FONT,
-            )).grid(row=3, column=5+i, padx=2, pady=3)
+        self._rl(tk.Label(cf,
+            text='Use Constraint Hints below to add rules like "must have digit" or "must have upper"',
+            bg=t["bg"], fg=t["muted"], font=_FONT_SM,
+        ), "muted").grid(row=3, column=4, columnspan=5, sticky="w", padx=8, pady=3)
 
         # Row 4 — Position rules
         self._rl(tk.Label(cf, text="Must not start with", bg=t["bg"], fg=t["fg"], font=_FONT)
@@ -803,14 +791,6 @@ class PwgenGUI:
         if self.no_walks_var.get():
             cfg["keyboard_walk"] = {"reject_if_walk_ratio_above": 0.5}
 
-        req = []
-        if self.req_upper_var.get():  req.append("upper")
-        if self.req_lower_var.get():  req.append("lower")
-        if self.req_digit_var.get():  req.append("digit")
-        if self.req_symbol_var.get(): req.append("symbol")
-        if req:
-            cfg.setdefault("charset_options", {})["require_classes"] = req
-
         if self.mutations_var.get() != "none":
             cfg["mutations"] = {"profile": self.mutations_var.get(), "max_expansion": 50}
 
@@ -908,12 +888,6 @@ class PwgenGUI:
         self.entropy_var.set(str(ent.get("min_bits", "")) if ent else "")
         self.no_walks_var.set(bool(cfg.get("keyboard_walk")))
 
-        rc = cfg.get("charset_options", {}).get("require_classes", [])
-        self.req_upper_var.set("upper"  in rc)
-        self.req_lower_var.set("lower"  in rc)
-        self.req_digit_var.set("digit"  in rc)
-        self.req_symbol_var.set("symbol" in rc)
-
         mut = cfg.get("mutations", {})
         self.mutations_var.set(mut.get("profile", "none") if mut else "none")
 
@@ -938,29 +912,6 @@ class PwgenGUI:
             rules = compile_rules(cfg)
         except (RuleConflictError, ValueError) as exc:
             messagebox.showerror("Configuration Error", str(exc))
-            return
-
-        # Warn if require_classes is impossible with the built charset
-        req        = set(getattr(rules, "require_classes", []))
-        has_upper  = any(c.isupper()     for c in rules.charset)
-        has_lower  = any(c.islower()     for c in rules.charset)
-        has_digit  = any(c.isdigit()     for c in rules.charset)
-        has_symbol = any(not c.isalnum() for c in rules.charset)
-        impossible = (
-            ("upper"  in req and not has_upper)  or
-            ("lower"  in req and not has_lower)  or
-            ("digit"  in req and not has_digit)  or
-            ("symbol" in req and not has_symbol)
-        )
-        if impossible:
-            messagebox.showerror(
-                "Impossible Constraint",
-                "One or more 'Must contain' classes are ticked, but the\n"
-                "selected character types can't satisfy them.\n\n"
-                "Example: 'Must contain upper' requires A-Z to be included.\n\n"
-                "Fix: tick the matching box under 'Include chars' too,\n"
-                "or uncheck the conflicting 'Must contain' box.",
-            )
             return
 
         self._last_cfg = cfg
