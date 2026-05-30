@@ -879,66 +879,159 @@ class PwgenGUI:
     # ── Validation ────────────────────────────────────────────────────────────
 
     def _pre_generate_checks(self) -> bool:
-        """Run friendly pre-flight checks. Return False to abort, True to proceed."""
-        issues: list[str] = []
-        tips:   list[str] = []
+        """Smart pre-flight checks — auto-fix where possible, block when output would be 0."""
 
-        # 1. Check at least one char type selected
-        if not any([
-            self.inc_digits_var.get(),
-            self.inc_lower_var.get(),
-            self.inc_upper_var.get(),
-            self.inc_symbols_var.get(),
-            self.extra_chars_var.get().strip(),
-        ]):
-            issues.append("• No character types selected.\n  Tick at least one box under 'Include chars'.")
-
-        # 2. Check combinatorial mode without length bounds
+        # ── Gather current state ───────────────────────────────────────────────
         seed_raw = self._seed_ph.get_real() if self._seed_ph else self.seed_text.get("1.0", "end").strip()
-        if not seed_raw:
-            length_set  = self.length_var.get().strip()
-            max_set     = self.max_var.get().strip()
-            max_val     = int(max_set) if max_set.isdigit() else 16
-            if not length_set and max_val > 10:
-                tips.append(
-                    f"• Combinatorial mode with Max length={max_val} can generate\n"
-                    f"  billions of candidates — consider setting Length (exact)\n"
-                    f"  or a lower Max length, or using Limit candidates."
-                )
+        words    = [w.strip() for w in seed_raw.splitlines() if w.strip()] if seed_raw else []
 
-        # 3. Wordlist mode tip about length filter
-        if seed_raw:
-            length_set = self.length_var.get().strip()
-            if length_set and length_set.isdigit():
-                target_len = int(length_set)
-                words = [w.strip() for w in seed_raw.splitlines() if w.strip()]
-                mismatched = [w for w in words if len(w) != target_len]
-                if mismatched:
-                    tips.append(
-                        f"• You have an exact Length={target_len} set.\n"
-                        f"  {len(mismatched)} of your {len(words)} seed word(s) have\n"
-                        f"  different lengths and will be filtered out.\n"
-                        f"  Clear the Length field to accept all seeds."
-                    )
-            if self.mutations_var.get() == "none":
-                tips.append(
-                    "• Wordlist mode with Mutations='none' only outputs exact seed words.\n"
-                    "  Set Mutations → 'standard' or 'aggressive' for more variants."
-                )
+        _DIGITS  = "0123456789"
+        _LOWER   = "abcdefghijklmnopqrstuvwxyz"
+        _UPPER   = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        _SYMBOLS = "!@#$%^&*()_+-=[]{}|;':\",./<>?"
 
-        if issues:
+        def _current_charset() -> set:
+            cs = ""
+            if self.inc_digits_var.get():  cs += _DIGITS
+            if self.inc_lower_var.get():   cs += _LOWER
+            if self.inc_upper_var.get():   cs += _UPPER
+            if self.inc_symbols_var.get(): cs += _SYMBOLS
+            cs += self.extra_chars_var.get()
+            return set(cs)
+
+        # ── 1. No character types selected — hard block ────────────────────────
+        if not _current_charset():
             messagebox.showerror(
-                "Mr.Pass — Fix before generating",
-                "Please fix the following before generating:\n\n" + "\n\n".join(issues)
+                "Mr.Pass — Fix required",
+                "No character types selected.\n\n"
+                "Tick at least one box under 'Include chars'\n"
+                "(Digits, Lowercase, Uppercase, or Symbols).",
             )
             return False
 
-        if tips:
-            answer = messagebox.askokcancel(
-                "Mr.Pass — Heads up",
-                "A few things to note:\n\n" + "\n\n".join(tips) + "\n\nContinue anyway?"
-            )
-            return bool(answer)
+        # ── Wordlist mode checks ───────────────────────────────────────────────
+        if words:
+
+            # 2a. Length (exact) will filter some or all seeds
+            length_set = self.length_var.get().strip()
+            if length_set and length_set.isdigit():
+                target_len = int(length_set)
+                matching   = [w for w in words if len(w) == target_len]
+                filtered   = [w for w in words if len(w) != target_len]
+
+                if not matching:
+                    # ALL seeds blocked → offer auto-fix
+                    preview = "\n".join(
+                        f"  • {w!r}  ({len(w)} chars, need {target_len})"
+                        for w in filtered[:6]
+                    )
+                    if len(filtered) > 6:
+                        preview += f"\n  … (+{len(filtered)-6} more)"
+                    answer = messagebox.askyesnocancel(
+                        "Mr.Pass — Length Filter Blocks Everything",
+                        f"Length (exact) = {target_len}, but NONE of your {len(words)} seed "
+                        f"word(s) are that length:\n\n{preview}\n\n"
+                        f"Result: 0 candidates.\n\n"
+                        f"  Yes    →  Clear Length automatically and continue\n"
+                        f"  No     →  Run anyway (will write 0 candidates)\n"
+                        f"  Cancel →  Go back and fix manually",
+                    )
+                    if answer is True:       # auto-fix
+                        self.length_var.set("")
+                        self.min_var.set("1")
+                        self.max_var.set("16")
+                        self._log(f"Auto-cleared Length={target_len} — incompatible with all seeds.", "WARN")
+                    elif answer is None:     # Cancel → abort
+                        return False
+                    # answer is False → let them run (0 output is their choice)
+
+                elif filtered:
+                    # SOME seeds blocked → offer auto-fix
+                    preview = "\n".join(
+                        f"  ✗  {w!r}  ({len(w)} chars)"
+                        for w in filtered[:4]
+                    )
+                    if len(filtered) > 4:
+                        preview += f"\n  … (+{len(filtered)-4} more)"
+                    answer = messagebox.askyesnocancel(
+                        "Mr.Pass — Some Seeds Will Be Filtered",
+                        f"{len(filtered)} of your {len(words)} seed words don't match "
+                        f"Length={target_len} and will be skipped:\n\n{preview}\n\n"
+                        f"Only {len(matching)} seed(s) will produce output.\n\n"
+                        f"  Yes    →  Clear Length to use all seeds\n"
+                        f"  No     →  Keep Length={target_len} (partial output)\n"
+                        f"  Cancel →  Go back",
+                    )
+                    if answer is True:
+                        self.length_var.set("")
+                        self.min_var.set("1")
+                        self.max_var.set("16")
+                        self._log(f"Auto-cleared Length={target_len} — some seeds were incompatible.", "WARN")
+                    elif answer is None:
+                        return False
+
+            # 2b. Charset blocks all seeds → offer to auto-expand
+            charset_set = _current_charset()
+            blocked = [(w, set(w) - charset_set) for w in words if set(w) - charset_set]
+            if blocked and len(blocked) == len(words):
+                examples = "\n".join(
+                    f"  • {w!r}  — missing: {''.join(sorted(bc))}"
+                    for w, bc in blocked[:4]
+                )
+                if len(blocked) > 4:
+                    examples += f"\n  … (+{len(blocked)-4} more)"
+                answer = messagebox.askyesnocancel(
+                    "Mr.Pass — Charset Blocks All Seeds",
+                    f"All seed words contain characters not in your selected charset:\n\n"
+                    f"{examples}\n\n"
+                    f"Result: 0 candidates.\n\n"
+                    f"  Yes    →  Auto-enable the missing character types\n"
+                    f"  No     →  Run anyway (0 output)\n"
+                    f"  Cancel →  Go back",
+                )
+                if answer is True:
+                    for w, bc in blocked:
+                        for c in bc:
+                            if c.islower():   self.inc_lower_var.set(True)
+                            elif c.isupper(): self.inc_upper_var.set(True)
+                            elif c.isdigit(): self.inc_digits_var.set(True)
+                            else:             self.inc_symbols_var.set(True)
+                    self._log("Auto-expanded charset to cover seed word characters.", "WARN")
+                elif answer is None:
+                    return False
+
+            # 2c. Mutations=none tip (non-blocking, informational)
+            if self.mutations_var.get() == "none":
+                answer = messagebox.askokcancel(
+                    "Mr.Pass — Wordlist Tip",
+                    "Mutations is set to 'none'.\n\n"
+                    "Your seed words will be output exactly as typed — no variations.\n\n"
+                    "For password testing, try:\n"
+                    "  Mutations → 'standard'   (capitalise, add numbers, leet-speak …)\n"
+                    "  Mutations → 'aggressive'  (many more combinations)\n\n"
+                    "Continue with exact seeds only?",
+                )
+                if not answer:
+                    return False
+
+        # ── Combinatorial mode: warn about huge search space ──────────────────
+        else:
+            length_set = self.length_var.get().strip()
+            max_set    = self.max_var.get().strip()
+            max_val    = int(max_set) if max_set.isdigit() else 16
+            if not length_set and max_val > 10:
+                answer = messagebox.askokcancel(
+                    "Mr.Pass — Large Search Space",
+                    f"Combinatorial mode with Max length={max_val} can generate\n"
+                    f"billions of candidates and run for a very long time.\n\n"
+                    f"Suggestions:\n"
+                    f"  • Set an exact Length (e.g. 7 or 8)\n"
+                    f"  • Lower the Max length\n"
+                    f"  • Set a Limit candidates value\n\n"
+                    f"Continue anyway?",
+                )
+                if not answer:
+                    return False
 
         return True
 
@@ -1024,13 +1117,13 @@ class PwgenGUI:
         if seed_raw:
             words = [w.strip() for w in seed_raw.splitlines() if w.strip()]
             if words:
-                # Auto-expand charset so letters/symbols in seeds aren't filtered out
-                if cfg.get("charset") == "digits" or (
-                    cfg.get("charset") == "custom" and
-                    cfg.get("custom_chars", "").isdigit()
-                ):
+                # Auto-expand charset so all seed characters are allowed
+                # (only needed if only digits are selected)
+                custom_chars = cfg.get("custom_chars", "")
+                if custom_chars and all(c in "0123456789" for c in custom_chars):
                     cfg["charset"] = "ascii"
-                    self._log("Charset auto-expanded to 'ascii' for wordlist mode.", "INFO")
+                    cfg.pop("custom_chars", None)
+                    self._log("Charset auto-expanded to 'ascii' for wordlist mode (was digits-only).", "INFO")
                 # Write seeds to temp file
                 fd, tmp = tempfile.mkstemp(suffix=".txt", prefix="mrpass_seeds_")
                 with os.fdopen(fd, "w", encoding="utf-8") as f:
